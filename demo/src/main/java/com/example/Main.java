@@ -3,154 +3,133 @@ package com.example;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Nó = vértice. Guarda o nó anterior e o nó seguinte. */
+/** Única classe de dados: o Nó (vértice). As formas nascem da ligação entre nós. */
 class No {
     final double x, y;
-    No anterior;   // null se não ligar a nenhuma linha
-    No proximo;    // null se não ligar a nenhuma linha
+    final double raio;     // > 0 só no nó de um círculo; 0 nos vértices
+    No anterior;           // null se não ligar a nenhuma linha
+    No proximo;            // null se não ligar a nenhuma linha
 
-    No(double x, double y) { this.x = x; this.y = y; }
+    No(double x, double y)              { this(x, y, 0); }
+    No(double x, double y, double raio) { this.x = x; this.y = y; this.raio = raio; }
 
-    /** Liga este nó ao seguinte (cria uma linha entre os dois). */
+    /** Cria a linha entre este nó e o outro. */
     void ligarA(No outro) {
         this.proximo = outro;
         outro.anterior = this;
     }
 
-    /** Corta a linha entre este nó e o seguinte: ambos os lados passam a null. */
+    /** Corta a linha para o próximo: os dois lados da ligação passam a null. */
     void desligarDoProximo() {
         if (proximo != null) proximo.anterior = null;
         proximo = null;
     }
 
-    double distanciaA(No o) { return Math.hypot(x - o.x, y - o.y); }
+    /**
+     * Percorre o loop a partir deste nó.
+     * Devolve null se algum nó for null (loop aberto) ou se houver mais de 4 nós.
+     */
+    List<No> percorrer() {
+        List<No> lista = new ArrayList<>();
+        No n = this;
+        while (true) {
+            if (n.proximo == null || n.anterior == null) return null;   // nó solto
+            if (n.proximo.anterior != n) return null;                   // ligação incoerente
+            lista.add(n);
+            n = n.proximo;
+            if (n == this) return lista;                                // loop fechado
+            if (lista.size() > 4) return null;                          // forma proibida
+        }
+    }
 
     @Override public String toString() { return "(" + x + ", " + y + ")"; }
 }
 
-/** Só estas 3 classes podem existir como Forma. Qualquer outra dá erro de compilação. */
-sealed abstract class Forma permits Triangulo, Retangulo, Circulo {
-    protected No atual;   // nó de referência (vértice atual / centro)
+public class Main {
 
-    No getAtual()    { return atual; }
-    No getAnterior() { return atual == null ? null : atual.anterior; }
-    No getProximo()  { return atual == null ? null : atual.proximo; }
+    // ---------- Construção: só se criam nós e ligações ----------
 
-    /** Avança para o nó seguinte; se for null, mantém-se onde está. */
-    boolean avancar() {
-        if (getProximo() == null) return false;
-        atual = atual.proximo;
-        return true;
+    static No criarCirculo(double cx, double cy, double raio) {
+        No centro = new No(cx, cy, raio);
+        centro.ligarA(centro);                  // loop de 1 nó
+        return centro;
     }
 
-    /** Recua para o nó anterior; se for null, mantém-se onde está. */
-    boolean recuar() {
-        if (getAnterior() == null) return false;
-        atual = atual.anterior;
-        return true;
+    static No criarLoop(No... nos) {
+        for (int i = 0; i < nos.length; i++) nos[i].ligarA(nos[(i + 1) % nos.length]);
+        return nos[0];
     }
 
-    /** Lista os nós percorrendo a lista ligada, parando se encontrar null ou fechar o loop. */
-    List<No> nos() {
-        List<No> lista = new ArrayList<>();
-        No n = atual;
-        while (n != null && !lista.contains(n)) {
-            lista.add(n);
-            n = n.proximo;
-        }
-        return lista;
+    // ---------- Identificação: proíbe tudo o que não seja as 3 formas ----------
+
+    static String identificar(No inicio) {
+        List<No> n = inicio.percorrer();
+        if (n == null) throw new IllegalStateException("Proibido: loop aberto, nó nulo ou mais de 4 nós.");
+
+        if (n.size() == 1 && inicio.raio > 0) return "CIRCULO";
+        for (No v : n) if (v.raio != 0) throw new IllegalStateException("Proibido: raio num vértice.");
+
+        if (n.size() == 3 && areaTriangulo(n) > 1e-9) return "TRIANGULO";
+        if (n.size() == 4 && eRetangulo(n)) return "RETANGULO";
+
+        throw new IllegalStateException("Proibido: esta ligação de nós não forma Triângulo, Retângulo nem Círculo.");
     }
 
-    abstract boolean valida();
-    abstract double area();
-    abstract double perimetro();
-}
-
-final class Triangulo extends Forma {
-    Triangulo(No a, No b, No c) {
-        a.ligarA(b); b.ligarA(c); c.ligarA(a);   // loop fechado
-        this.atual = a;
-        if (!valida()) throw new IllegalArgumentException("Pontos colineares: não formam triângulo.");
-    }
-
-    @Override boolean valida() {
-        List<No> n = nos();
-        if (n.size() != 3 || n.get(2).proximo != n.get(0)) return false;  // loop tem de fechar
-        return area() > 0;
-    }
-
-    @Override double area() {
-        List<No> n = nos();
-        if (n.size() != 3) return 0;
+    static double areaTriangulo(List<No> n) {
         No a = n.get(0), b = n.get(1), c = n.get(2);
         return Math.abs(a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)) / 2;
     }
 
-    @Override double perimetro() {
-        List<No> n = nos();
-        if (n.size() != 3) return 0;
-        return n.get(0).distanciaA(n.get(1)) + n.get(1).distanciaA(n.get(2)) + n.get(2).distanciaA(n.get(0));
-    }
-}
-
-final class Retangulo extends Forma {
-    private final double largura, altura;
-
-    Retangulo(double x, double y, double largura, double altura) {
-        if (largura <= 0 || altura <= 0) throw new IllegalArgumentException("Dimensões inválidas.");
-        this.largura = largura; this.altura = altura;
-        No a = new No(x, y), b = new No(x + largura, y),
-           c = new No(x + largura, y + altura), d = new No(x, y + altura);
-        a.ligarA(b); b.ligarA(c); c.ligarA(d); d.ligarA(a);   // loop fechado
-        this.atual = a;
-    }
-
-    @Override boolean valida() {
-        List<No> n = nos();
-        return n.size() == 4 && n.get(3).proximo == n.get(0);
-    }
-
-    @Override double area()      { return valida() ? largura * altura : 0; }
-    @Override double perimetro() { return valida() ? 2 * (largura + altura) : 0; }
-}
-
-/** Círculo não tem cantos: só tem o nó do centro, sem linhas ligadas (anterior e próximo = null). */
-final class Circulo extends Forma {
-    private final double raio;
-
-    Circulo(double cx, double cy, double raio) {
-        if (raio <= 0) throw new IllegalArgumentException("Raio inválido.");
-        this.raio = raio;
-        this.atual = new No(cx, cy);   // anterior = null, proximo = null
-    }
-
-    @Override boolean valida()   { return atual != null; }
-    @Override double area()      { return Math.PI * raio * raio; }
-    @Override double perimetro() { return 2 * Math.PI * raio; }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        Triangulo t = new Triangulo(new No(0, 0), new No(4, 0), new No(0, 3));
-        Retangulo r = new Retangulo(0, 0, 5, 2);
-        Circulo   c = new Circulo(1, 1, 3);
-
-        for (Forma f : new Forma[]{t, r, c}) {
-            System.out.printf("%s | nós=%s | área=%.2f | perímetro=%.2f | válida=%b%n",
-                    f.getClass().getSimpleName(), f.nos(), f.area(), f.perimetro(), f.valida());
-            System.out.println("  atual=" + f.getAtual()
-                    + " anterior=" + f.getAnterior()
-                    + " próximo=" + f.getProximo());
+    static boolean eRetangulo(List<No> n) {
+        for (int i = 0; i < 4; i++) {
+            No p = n.get(i), seg = n.get((i + 1) % 4), ant = n.get((i + 3) % 4);
+            double v1x = seg.x - p.x, v1y = seg.y - p.y;
+            double v2x = ant.x - p.x, v2y = ant.y - p.y;
+            if (Math.hypot(v1x, v1y) < 1e-9 || Math.hypot(v2x, v2y) < 1e-9) return false;
+            if (Math.abs(v1x * v2x + v1y * v2y) > 1e-9) return false;   // ângulo não é reto
         }
+        return true;
+    }
 
-        // Cortar uma linha do retângulo: os nós que perdem a ligação ficam null
-        System.out.println("\n-- A cortar a linha entre o 1.º e o 2.º nó do retângulo --");
-        r.getAtual().desligarDoProximo();
-        System.out.println("atual=" + r.getAtual()
-                + " anterior=" + r.getAnterior()
-                + " próximo=" + r.getProximo());   // próximo = null
-        System.out.println("Retângulo válido? " + r.valida());  // false: o loop já não fecha
+    // ---------- Impressão do anterior / atual / próximo ----------
+
+    static void mostrar(String titulo, No inicio) {
+        System.out.println("== " + titulo + " ==");
+        try {
+            System.out.println("Forma: " + identificar(inicio));
+        } catch (IllegalStateException e) {
+            System.out.println(e.getMessage());
+        }
+        No n = inicio;
+        for (int i = 0; i < 5 && n != null; i++) {
+            System.out.println("  anterior=" + n.anterior + "  atual=" + n + "  próximo=" + n.proximo);
+            n = n.proximo;
+            if (n == inicio) break;
+        }
+        System.out.println();
+    }
+
+    public static void main(String[] args) {
+        mostrar("Triângulo",
+                criarLoop(new No(0, 0), new No(4, 0), new No(0, 3)));
+
+        mostrar("Retângulo",
+                criarLoop(new No(0, 0), new No(5, 0), new No(5, 2), new No(0, 2)));
+
+        mostrar("Círculo", criarCirculo(1, 1, 3));
+
+        mostrar("Pentágono (proibido)",
+                criarLoop(new No(0, 0), new No(2, 0), new No(3, 2), new No(1, 3), new No(-1, 2)));
+
+        // Loop aberto: o último nó não liga a nenhuma linha, por isso é null
+        No a = new No(0, 0), b = new No(4, 0), c = new No(0, 3);
+        a.ligarA(b);
+        b.ligarA(c);
+        mostrar("Triângulo com loop aberto (proibido)", a);
+
+        // Cortar uma linha de um retângulo válido
+        No r = criarLoop(new No(0, 0), new No(5, 0), new No(5, 2), new No(0, 2));
+        r.desligarDoProximo();
+        mostrar("Retângulo depois de cortar uma linha (proibido)", r);
     }
 }
-
-// class Hexagono extends Forma { }   // ERRO DE COMPILAÇÃO: Forma é sealed e só permite as 3 formas
